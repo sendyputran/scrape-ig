@@ -400,6 +400,20 @@ async function scrapeProfile(page, target) {
     try {
       const res = await scrapeProfile(page, t);
       console.log(`📊 ${t} ->`, res);
+      
+      // Save to CSV
+      const csvFile = path.join(process.cwd(), "data.csv");
+      const timestamp = new Date().toISOString();
+      const csvLine = `${timestamp},${res.url},${res.posts},${res.followers},${res.following}\n`;
+      
+      // Check if file exists to add header
+      const header = "timestamp,url,posts,followers,following\n";
+      if (!fs.existsSync(csvFile)) {
+        fs.writeFileSync(csvFile, header);
+      }
+      fs.appendFileSync(csvFile, csvLine);
+      console.log(`📝 Saved to ${csvFile}`);
+      
       await sleep(1200);
     } catch (err) {
       console.error(`❌ Failed for ${t}:`, err?.message || err);
