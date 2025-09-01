@@ -82,6 +82,34 @@ function pickMorePrecise(a, b) {
   return String(a).length >= String(b).length ? a : b;
 }
 
+// New: wait for any of the selectors in any frame, with retries
+async function waitForAnySelectorInFrames(page, selectors, opts = {}) {
+  const attempts = opts.attempts ?? 5;
+  const perTryTimeout = opts.timeout ?? 10000;
+  for (let i = 0; i < attempts; i++) {
+    const frames = page.frames();
+    for (const sel of selectors) {
+      for (const f of frames) {
+        try {
+          const handle = await f.waitForSelector(sel, { visible: true, timeout: perTryTimeout });
+          if (handle) return { handle, frame: f, selector: sel };
+        } catch (_) {}
+      }
+    }
+    // On retry, try to reveal the login form if present
+    try {
+      await page.evaluate(() => {
+        const texts = ["log in","masuk","login"]; // EN + ID
+        const btn = Array.from(document.querySelectorAll('a,button'))
+          .find(b => texts.some(t => (b.textContent||'').toLowerCase().includes(t)));
+        if (btn) btn.click();
+      });
+    } catch (_) {}
+    await sleep(1500);
+  }
+  throw new Error(`Element not found: one of ${selectors.join(', ')}`);
+}
+
 async function login(page) {
   const maxRetries = 3;
   let attempt = 0;
@@ -89,7 +117,7 @@ async function login(page) {
     try {
       await page.goto("https://www.instagram.com/accounts/login/", {
         waitUntil: "networkidle2",
-        timeout: 600000,
+        timeout: 180000,
       });
       break; // Success, exit loop
     } catch (error) {
@@ -98,26 +126,61 @@ async function login(page) {
       if (attempt >= maxRetries) {
         throw new Error(`Failed to load login page after ${maxRetries} attempts: ${error.message}`);
       }
-      // Wait before retrying (exponential backoff)
-      await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+      await sleep(2000 * attempt);
     }
   }
 
   // Best-effort cookie banner
   await page.evaluate(() => {
-    const texts = ["allow all","accept all","accept","only allow essential","Izinkan semua"];
-    const btn = Array.from(document.querySelectorAll("button")).find(b =>
-      texts.some(t => (b.textContent || "").toLowerCase().includes(t)));
+    const texts = ["allow all","accept all","accept","only allow essential","Izinkan semua","Allow essential cookies only","Only allow essential cookies"];
+    const btn = Array.from(document.querySelectorAll("button"))
+      .find(b => texts.some(t => (b.textContent || "").toLowerCase().includes(t)));
     if (btn) btn.click();
   }).catch(()=>{});
+  await sleep(1500);
 
-  await page.waitForSelector('input[name="username"]', { visible: true, timeout: 60000 });
-  await page.type('input[name="username"]', IG_USER, { delay: 45 });
-  await page.type('input[name="password"]', IG_PASS, { delay: 45 });
-  await page.click('button[type="submit"]');
+  // Sometimes the login lives inside an iframe — search all frames
+  const { handle: usernameHandle, frame: usernameFrame } = await waitForAnySelectorInFrames(page, [
+    'input[name="username"]',
+    'input[aria-label="Phone number, username, or email"]',
+    'input[aria-label="Username"]'
+  ], { attempts: 6, timeout: 12000 });
+
+  // Find matching password input in the same frame, fall back to any frame
+  let passwordHandle = null;
+  if (usernameFrame) {
+    try {
+      passwordHandle = await usernameFrame.waitForSelector('input[name="password"], input[type="password"]', { visible: true, timeout: 12000 });
+    } catch (_) {}
+  }
+  if (!passwordHandle) {
+    const { handle } = await waitForAnySelectorInFrames(page, [
+      'input[name="password"]',
+      'input[type="password"]'
+    ], { attempts: 6, timeout: 12000 });
+    passwordHandle = handle;
+  }
+
+  await usernameHandle.type(IG_USER, { delay: 45 });
+  await passwordHandle.type(IG_PASS, { delay: 45 });
+
+  // Submit: try nearest form submit, then generic button[type=submit]
+  const submitted = await page.evaluate((selUser) => {
+    const input = document.querySelector(selUser) || document.querySelector('input[name="username"]');
+    const form = input?.closest('form');
+    if (form) { form.submit?.(); return true; }
+    const btn = Array.from(document.querySelectorAll('button[type="submit"], button'))
+      .find(b => (b.textContent||'').toLowerCase().includes('log in') || b.type === 'submit');
+    if (btn) { btn.click(); return true; }
+    return false;
+  }, 'input[name="username"]').catch(()=>false);
+
+  if (!submitted) {
+    try { await page.click('button[type="submit"]'); } catch (_) {}
+  }
 
   // move past login
-  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }).catch(()=>{});
+  await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 120000 }).catch(()=>{});
 
   // Dismiss “Not now” prompts
   await page.evaluate(() => {
