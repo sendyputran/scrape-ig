@@ -10,8 +10,7 @@ const IG_USER = process.env.IG_USER;
 const IG_PASS = process.env.IG_PASS;
 
 if (!IG_USER || !IG_PASS) {
-  console.error("❌ Set IG_USER and IG_PASS in .env");
-  process.exit(1);
+  console.warn("ℹ️ IG_USER/IG_PASS not set; will attempt scrape without login.");
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -61,6 +60,21 @@ ${fmtTrail(payload.debug?.brittleNodes)}
 `;
   fs.writeFileSync(file, txt, "utf8");
   console.log(`📝 wrote log -> ${file}`);
+}
+
+async function acceptCookies(page) {
+  try {
+    await page.evaluate(() => {
+      const texts = [
+        "allow all","accept all","accept","only allow essential","allow essential",
+        "only allow essential cookies","izinkan semua","terima","setuju","accept necessary"
+      ];
+      const nodes = Array.from(document.querySelectorAll('button, [role="button"], a'));
+      const btn = nodes.find(b => texts.some(t => (b.textContent||"").toLowerCase().includes(t)));
+      if (btn) btn.click();
+    });
+  } catch {}
+  await sleep(1200);
 }
 
 function expandCompact(str) {
@@ -117,7 +131,7 @@ async function login(page) {
     try {
       await page.goto("https://www.instagram.com/accounts/login/", {
         waitUntil: "networkidle2",
-        timeout: 180000,
+  timeout: 180000,
       });
       break; // Success, exit loop
     } catch (error) {
@@ -131,13 +145,7 @@ async function login(page) {
   }
 
   // Best-effort cookie banner
-  await page.evaluate(() => {
-    const texts = ["allow all","accept all","accept","only allow essential","Izinkan semua","Allow essential cookies only","Only allow essential cookies"];
-    const btn = Array.from(document.querySelectorAll("button"))
-      .find(b => texts.some(t => (b.textContent || "").toLowerCase().includes(t)));
-    if (btn) btn.click();
-  }).catch(()=>{});
-  await sleep(1500);
+  await acceptCookies(page);
 
   // Sometimes the login lives inside an iframe — search all frames
   const { handle: usernameHandle, frame: usernameFrame } = await waitForAnySelectorInFrames(page, [
@@ -411,7 +419,8 @@ async function scrapeProfile(page, target) {
   const url = isUrl ? target : `https://www.instagram.com/${username}/`;
 
   // Visit the profile first (keeps cookies/session warm)
-  await page.goto(url, { waitUntil: "networkidle2", timeout: 60000 });
+  await page.goto(url, { waitUntil: "networkidle2", timeout: 90000 });
+  await acceptCookies(page);
 
   // PRIMARY: Web JSON
   const api = await fetchProfileJSON(page, username);
@@ -450,18 +459,29 @@ async function scrapeProfile(page, target) {
       "--ignore-certificate-errors",
       "--ignore-ssl-errors",
       "--disable-features=VizDisplayCompositor",
-      "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "--lang=en-US"
     ],
   });
 
   const page = await browser.newPage();
   await page.setViewport({ width: 1366, height: 900 });
+  try { await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" }); } catch {}
 
-  await login(page);
+  // We'll try scraping without login first; only login if needed
 
   for (const t of targets) {
     try {
-      const res = await scrapeProfile(page, t);
+      let res = await scrapeProfile(page, t);
+      const needsLogin = [res.posts, res.followers, res.following].every(v => v == null);
+      if (needsLogin && IG_USER && IG_PASS) {
+        try {
+          await login(page);
+          res = await scrapeProfile(page, t);
+        } catch (e) {
+          console.warn("⚠️ Login attempt failed, continuing with no-login result.", e?.message || e);
+        }
+      }
       console.log(`📊 ${t} ->`, res);
       
       // Save to CSV
@@ -480,6 +500,13 @@ async function scrapeProfile(page, target) {
       await sleep(1200);
     } catch (err) {
       console.error(`❌ Failed for ${t}:`, err?.message || err);
+      try {
+        const dir = ensureLogsDir();
+        const ts = new Date().toISOString().replace(/[:.]/g, "-");
+        await page.screenshot({ path: path.join(dir, `error-${t}-${ts}.png`) }).catch(()=>{});
+        const html = await page.content().catch(()=>"");
+        if (html) fs.writeFileSync(path.join(dir, `error-${t}-${ts}.html`), html, "utf8");
+      } catch {}
     }
   }
 
