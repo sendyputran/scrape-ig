@@ -146,8 +146,8 @@ async function login(page) {
   while (attempt < maxRetries) {
     try {
       await page.goto("https://www.instagram.com/accounts/login/", {
-        waitUntil: "networkidle2",
-  timeout: 180000,
+        waitUntil: "domcontentloaded",
+        timeout: 90000,
       });
       break; // Success, exit loop
     } catch (error) {
@@ -442,7 +442,7 @@ async function scrapeProfile(page, target) {
   const url = isUrl ? target : `https://www.instagram.com/${username}/`;
 
   // Visit the profile first (keeps cookies/session warm)
-  await page.goto(url, { waitUntil: "networkidle2", timeout: 90000 });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
   await acceptCookies(page);
 
   // PRIMARY: Web JSON
@@ -491,6 +491,17 @@ async function scrapeProfile(page, target) {
   await page.setViewport({ width: 1366, height: 900 });
   try { await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" }); } catch {}
   await loadCookies(page);
+
+  // Speed/stability: block heavy resources
+  try {
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      const type = req.resourceType();
+      if (['image','media','font','stylesheet'].includes(type)) return req.abort();
+      req.continue();
+    });
+  } catch {}
+  page.setDefaultTimeout(60000);
 
   // We'll try scraping without login first; only login if needed
 
