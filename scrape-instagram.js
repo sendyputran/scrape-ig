@@ -89,7 +89,7 @@ async function login(page) {
     try {
       await page.goto("https://www.instagram.com/accounts/login/", {
         waitUntil: "networkidle2",
-        timeout: 60000,
+        timeout: 600000,
       });
       break; // Success, exit loop
     } catch (error) {
