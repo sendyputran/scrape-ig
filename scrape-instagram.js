@@ -164,23 +164,55 @@ async function login(page) {
   await acceptCookies(page);
 
   // Sometimes the login lives inside an iframe — search all frames
-  const { handle: usernameHandle, frame: usernameFrame } = await waitForAnySelectorInFrames(page, [
-    'input[name="username"]',
-    'input[aria-label="Phone number, username, or email"]',
-    'input[aria-label="Username"]'
-  ], { attempts: 6, timeout: 12000 });
+  let usernameHandle, usernameFrame;
+  try {
+    ({ handle: usernameHandle, frame: usernameFrame } = await waitForAnySelectorInFrames(page, [
+      'input[name="username"]',
+      'input[aria-label="Phone number, username, or email"]',
+      'input[aria-label="Username"]',
+      'input[autocomplete="username"]'
+    ], { attempts: 6, timeout: 12000 }));
+  } catch (e1) {
+    // Fallback: go to homepage and click login
+    try {
+      await page.goto('https://www.instagram.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await acceptCookies(page);
+      await page.evaluate(() => {
+        const texts = ['log in','masuk','login'];
+        const el = Array.from(document.querySelectorAll('a,button')).find(b => texts.some(t => (b.textContent||'').toLowerCase().includes(t)));
+        el?.click();
+      });
+      ({ handle: usernameHandle, frame: usernameFrame } = await waitForAnySelectorInFrames(page, [
+        'input[name="username"]',
+        'input[aria-label="Phone number, username, or email"]',
+        'input[aria-label="Username"]',
+        'input[autocomplete="username"]'
+      ], { attempts: 4, timeout: 8000 }));
+    } catch (e2) {
+      // Fallback: try mobile login which is more deterministic
+      await page.goto('https://m.instagram.com/accounts/login/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await acceptCookies(page);
+      ({ handle: usernameHandle, frame: usernameFrame } = await waitForAnySelectorInFrames(page, [
+        'input[name="username"]',
+        'input[aria-label="Phone number, username, or email"]',
+        'input[aria-label="Username"]',
+        'input[autocomplete="username"]'
+      ], { attempts: 4, timeout: 8000 }));
+    }
+  }
 
   // Find matching password input in the same frame, fall back to any frame
   let passwordHandle = null;
   if (usernameFrame) {
     try {
-      passwordHandle = await usernameFrame.waitForSelector('input[name="password"], input[type="password"]', { visible: true, timeout: 12000 });
+      passwordHandle = await usernameFrame.waitForSelector('input[name="password"], input[type="password"], input[autocomplete="current-password"]', { visible: true, timeout: 12000 });
     } catch (_) {}
   }
   if (!passwordHandle) {
     const { handle } = await waitForAnySelectorInFrames(page, [
       'input[name="password"]',
-      'input[type="password"]'
+      'input[type="password"]',
+      'input[autocomplete="current-password"]'
     ], { attempts: 6, timeout: 12000 });
     passwordHandle = handle;
   }
@@ -497,7 +529,7 @@ async function scrapeProfile(page, target) {
     await page.setRequestInterception(true);
     page.on('request', req => {
       const type = req.resourceType();
-      if (['image','media','font','stylesheet'].includes(type)) return req.abort();
+  if (['image','media','font'].includes(type)) return req.abort();
       req.continue();
     });
   } catch {}
