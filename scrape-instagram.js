@@ -1,7 +1,10 @@
 const fs = require("fs");
 const path = require("path");
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 require("dotenv").config();
+
+puppeteer.use(StealthPlugin());
 
 const IG_USER = process.env.IG_USER;
 const IG_PASS = process.env.IG_PASS;
@@ -108,7 +111,7 @@ async function login(page) {
     if (btn) btn.click();
   }).catch(()=>{});
 
-  await page.waitForSelector('input[name="username"]', { visible: true, timeout: 30000 });
+  await page.waitForSelector('input[name="username"]', { visible: true, timeout: 60000 });
   await page.type('input[name="username"]', IG_USER, { delay: 45 });
   await page.type('input[name="password"]', IG_PASS, { delay: 45 });
   await page.click('button[type="submit"]');
