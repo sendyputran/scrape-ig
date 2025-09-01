@@ -1,4 +1,5 @@
-name: Scrape Instagram
+name: Pull latest changes
+run: git pull --rebase origin main
 
 on:
   schedule:
