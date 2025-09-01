@@ -8,6 +8,7 @@ puppeteer.use(StealthPlugin());
 
 const IG_USER = process.env.IG_USER;
 const IG_PASS = process.env.IG_PASS;
+const IG_COOKIES = process.env.IG_COOKIES; // base64-encoded JSON array of cookies
 
 if (!IG_USER || !IG_PASS) {
   console.warn("ℹ️ IG_USER/IG_PASS not set; will attempt scrape without login.");
@@ -60,6 +61,21 @@ ${fmtTrail(payload.debug?.brittleNodes)}
 `;
   fs.writeFileSync(file, txt, "utf8");
   console.log(`📝 wrote log -> ${file}`);
+}
+
+async function loadCookies(page) {
+  if (!IG_COOKIES) return;
+  try {
+    const json = Buffer.from(IG_COOKIES, 'base64').toString('utf8');
+    const cookies = JSON.parse(json);
+    if (Array.isArray(cookies) && cookies.length) {
+      const norm = cookies.map(c => ({ domain: '.instagram.com', ...c }));
+      await page.setCookie(...norm);
+      console.log(`🍪 loaded ${norm.length} cookies from secret`);
+    }
+  } catch (e) {
+    console.warn("⚠️ Failed to load IG_COOKIES:", e?.message || e);
+  }
 }
 
 async function acceptCookies(page) {
@@ -189,6 +205,13 @@ async function login(page) {
 
   // move past login
   await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 120000 }).catch(()=>{});
+
+  // Persist cookies after successful login (printed as base64 to hide raw JSON)
+  try {
+    const cookies = await page.cookies();
+    const b64 = Buffer.from(JSON.stringify(cookies), 'utf8').toString('base64');
+    console.log("🍪 session cookies (base64):", b64.slice(0, 80) + '...');
+  } catch {}
 
   // Dismiss “Not now” prompts
   await page.evaluate(() => {
@@ -467,6 +490,7 @@ async function scrapeProfile(page, target) {
   const page = await browser.newPage();
   await page.setViewport({ width: 1366, height: 900 });
   try { await page.setExtraHTTPHeaders({ "Accept-Language": "en-US,en;q=0.9" }); } catch {}
+  await loadCookies(page);
 
   // We'll try scraping without login first; only login if needed
 
