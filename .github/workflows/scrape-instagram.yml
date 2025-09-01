@@ -26,6 +26,18 @@ jobs:
         env:
           IG_USER: ${{ secrets.IG_USER }}
           IG_PASS: ${{ secrets.IG_PASS }}
+          IG_COOKIES: ${{ secrets.IG_COOKIES }}
+
+      - name: Upload logs and data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrape-artifacts
+          path: |
+            logs/**
+            data.csv
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Commit data
         run: |
