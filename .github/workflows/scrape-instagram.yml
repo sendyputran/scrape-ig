@@ -1,0 +1,28 @@
+name: Scrape Instagram
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run scraper
+        run: node scrape-instagram.js telkomuniversity_purwokerto
+        env:
+          IG_USER: ${{ secrets.IG_USER }}
+          IG_PASS: ${{ secrets.IG_PASS }}
