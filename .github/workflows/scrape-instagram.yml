@@ -27,7 +27,7 @@ jobs:
         run: npm install
 
       - name: Run scraper
-        run: node scrape-instagram.js telkomuniversity_purwokerto
+        run: node scrape-instagram.js dlas_serangofficial
         env:
           IG_USER: ${{ secrets.IG_USER }}
           IG_PASS: ${{ secrets.IG_PASS }}
